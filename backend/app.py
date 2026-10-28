@@ -25,7 +25,8 @@ import autotermos
 import enrich
 import ideias
 import lowticket
-from lowticket import COTACAO_BRL, LOW_TICKET_MAX, NAO_VENDE
+from lowticket import (COTACAO_BRL, LOW_TICKET_MAX, NAO_VENDE,
+                       LOW_TICKET_DIAS_MIN, LOW_TICKET_CRIATIVOS_MIN)
 import midias
 from db import confere_senha, get_db, novo_token, user_por_token
 from gateways import e_gateway, tipo_de
@@ -406,6 +407,7 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
         SELECT a.ad_archive_id, a.page_id, a.page_name, a.is_active, a.start_date,
                a.dias_ativo, a.plataformas, a.cta_text, a.link_url, a.midia,
                a.midia_url, a.midia_poster, a.variacoes, a.termo, a.pais,
+               a.titulo, a.legenda,
                LEFT(a.texto, 400) AS texto,
                d.url_final, d.dominio, d.gateway,
                d.checkout_url, d.preco, d.preco_valor, d.preco_moeda,
@@ -430,6 +432,7 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
             "dias_rodando": 0, "dias_novo": None, "primeiro_anuncio": None,
             "termos": set(), "paises": set(), "plataformas": set(), "midias": set(),
             "dominios": {}, "gateways": {}, "destinos": {}, "precos": [],
+            "ofertas": {},
             "checkout_url": "", "melhor_texto": "", "cta": set(),
             "imagem": "", "imagem_anuncio": "", "video": "", "poster": "",
             "pendente_enriquecimento": False,
@@ -483,6 +486,15 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
                                    r["preco_moeda"] or ""))
         if r["link_url"] and r["destino_status"] in (None, "pendente", "processando"):
             item["pendente_enriquecimento"] = True
+        dominio_oferta = lowticket.dominio_da_oferta(r["link_url"], r["dominio"])
+        oferta = item["ofertas"].setdefault(dominio_oferta, {
+            "ativos": 0, "criativos": 0, "dias": 0, "copies": []
+        })
+        oferta["ativos"] += 1 if r["is_active"] else 0
+        oferta["criativos"] += r["variacoes"] or 1
+        oferta["dias"] = max(oferta["dias"], r["dias_ativo"] or 0)
+        copy = " ".join(filter(None, (r["texto"], r["titulo"], r["legenda"], r["cta_text"])))
+        oferta["copies"].append((r["termo"] or "", copy))
         # Anúncio de catálogo traz o molde cru ("{{product.brand}}") no lugar
         # da copy: não serve para ler a oferta, fica com o de outro anúncio.
         texto = r["texto"] or ""
@@ -542,6 +554,10 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
             "plataformas": sorted(it["plataformas"]),
             "cta": sorted(it["cta"])[:3],
             "copy": it["melhor_texto"][:400],
+            "copy_qualificada": [],
+            "criterios_low_ticket": [],
+            "oferta_dominio": "",
+            "criativos_oferta": 0,
             "pendente": it["pendente_enriquecimento"],
             "url_biblioteca": (
                 "https://www.facebook.com/ads/library/?active_status=active"
@@ -550,6 +566,28 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
         }
         # Escala = anúncios ativos ponderados pelo tempo que a oferta aguenta rodar.
         o["score"] = round(o["anuncios_ativos"] * (1 + o["dias_rodando"] / 30), 1)
+        # Qualificação nova: palavra-chave/derivado na copy, pelo menos um
+        # gatilho low ticket, mais de 15 dias e 5+ anúncios/criativos da mesma
+        # oferta (mesmo anunciante + domínio), não de produtos misturados.
+        for dominio, oferta in it["ofertas"].items():
+            volume = max(oferta["ativos"], oferta["criativos"])
+            if oferta["dias"] <= LOW_TICKET_DIAS_MIN or volume < LOW_TICKET_CRIATIVOS_MIN:
+                continue
+            for termo_copy, copy in oferta["copies"]:
+                q = lowticket.qualifica_copy(termo_copy, copy)
+                if q["qualifica_copy"]:
+                    o["copy_qualificada"].append(termo_copy or "")
+                    o["criterios_low_ticket"].extend(
+                        c["categoria"] for c in q["criterios_low_ticket"]
+                    )
+                    o["oferta_dominio"] = dominio
+                    o["criativos_oferta"] = volume
+                    break
+            if o["oferta_dominio"]:
+                break
+        o["copy_qualificada"] = sorted(set(x for x in o["copy_qualificada"] if x))
+        o["criterios_low_ticket"] = sorted(set(o["criterios_low_ticket"]))
+        o["qualificado_low_ticket"] = bool(o["oferta_dominio"])
         saida.append(o)
 
     min_ads = int(filtros.get("min_anuncios") or 0)
@@ -564,7 +602,8 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
     com_foto = filtros.get("com_foto") in ("1", "true", "on")
     # Low ticket = preço detectado até R$ 50 (ou o "até" da tela), com página
     # de checkout e destino que vende — perfil, app e WhatsApp ficam de fora.
-    low = filtros.get("low") in ("1", "true", "on")
+    # O produto agora tem um único modo: pesquisa Low Ticket qualificada.
+    low = True
 
     def numero(chave):
         try:
@@ -578,6 +617,8 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
         preco_max = preco_max or LOW_TICKET_MAX
 
     def passa(i: dict) -> bool:
+        if not i["qualificado_low_ticket"]:
+            return False
         if i["anuncios_ativos"] < min_ads or i["dias_rodando"] < min_dias:
             return False
         if gateway and gateway not in (i["gateway"] or "").lower():
@@ -604,7 +645,9 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
             return False
         if com_foto and not (i["imagem"] or i["video"] or i["imagem_site"]):
             return False
-        if termo and termo not in " ".join(i["termos"]).lower():
+        if termo and termo not in " ".join(i["termos"]).lower() and termo not in i["copy"].lower():
+            # O termo digitado deve ser o termo da pesquisa ou aparecer na copy;
+            # a qualificação da copy já foi feita por anúncio acima.
             return False
         if busca and busca not in " ".join(str(v) for v in i.values()).lower():
             return False

@@ -12,6 +12,10 @@ corte acontece em dois momentos:
 
 from __future__ import annotations
 
+import re
+import unicodedata
+from urllib.parse import urlsplit
+
 from gateways import IGNORAR, host, tipo_de
 
 # Low ticket se mede em real: US$ 49 não é oferta de entrada no Brasil.
@@ -86,3 +90,94 @@ def podar(conn, urls=None) -> int:
                     WHERE excluido_em IS NULL AND link_url IS NOT DISTINCT FROM %s
                 """, (r["link_url"],)).rowcount
     return n
+
+
+# ---------------------------------------------------------------------------
+# Qualificação da pesquisa Low Ticket: copy + palavra-chave + persistência.
+
+LOW_TICKET_DIAS_MIN = 15
+LOW_TICKET_CRIATIVOS_MIN = 5
+
+LOW_TICKET_COPY_REGRAS = (
+    ("gancho de preço", (
+        r"menos de(?:\s+rs?\$?\s*[\d,.]+)?\s*(?:por\s+dia|por\s+m[eê]s|por\s+semana)?",
+        r"por\s+apenas", r"apenas\s+rs?\$?", r"pre[cç]o\s+de\s+(?:banana|custo)",
+        r"menos que um\s+(?:lanche|cafe|caf[eé]|pizza)", r"valor\s+simb[oó]lico",
+        r"desconto\s+de\s+lan[cç]amento", r"economiz[aeiou]+",
+    )),
+    ("promessa de resolução", (
+        r"pronto\s+para\s+usar", r"c[oó]pia\s+e\s+cola", r"passo\s+a\s+passo",
+        r"m[eé]todo\s+(?:validado|simples)", r"em\s+\d+\s+minutos?",
+        r"em\s+menos\s+de\s+\d+\s+hora", r"do\s+zero\s+ao\s+\w+",
+        r"automatizad[oa]", r"ferramenta\s+secreta",
+    )),
+    ("produto empacotado", (
+        r"\bpack\b", r"\bkit\b", r"combo\s+completo", r"modelo\s+edit[aá]vel",
+    )),
+    ("dor ou bloqueio", (
+        r"trav[aá]do", r"sem\s+tempo", r"sem\s+dinheiro", r"or[cç]amento\s+apertado",
+        r"n[aã]o\s+sabe\s+por\s+onde\s+come[cç]ar", r"erros\s+comuns",
+        r"armadilhas", r"zero\s+resultados?", r"n[aã]o\s+vende\s+nada",
+        r"trabalho\s+manual", r"perrengue", r"dificuldade\s+com",
+    )),
+    ("chamada para ação", (
+        r"garantir\s+meu\s+acesso", r"baixar\s+agora", r"desbloquear",
+        r"quero\s+o\s+kit\s+completo", r"acessar\s+(?:a\s+)?(?:ferramenta|material)",
+    )),
+)
+
+
+def normalizar_copy(valor) -> str:
+    texto = unicodedata.normalize("NFKD", str(valor or "")).encode(
+        "ascii", "ignore").decode("ascii").lower()
+    return re.sub(r"[^a-z0-9]+", " ", texto).strip()
+
+
+def _regex_normalizada(regex: str) -> str:
+    texto = unicodedata.normalize("NFKD", regex).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", lambda _m: r"\s+", texto)
+
+
+def sinais_lowticket(copy: str) -> list[dict]:
+    texto = normalizar_copy(copy)
+    achados = []
+    for categoria, regras in LOW_TICKET_COPY_REGRAS:
+        encontrados = []
+        for regra in regras:
+            if re.search(_regex_normalizada(regra), texto):
+                encontrados.append(regra.replace(r"\b", "").replace("\\s+", " "))
+        if encontrados:
+            achados.append({"categoria": categoria, "termos": encontrados})
+    return achados
+
+
+def palavra_na_copy(termo: str, copy: str) -> bool:
+    """Aceita a palavra-chave e flexões/derivados simples em português."""
+    tokens_termo = re.findall(r"[a-z0-9]+", normalizar_copy(termo))
+    tokens_copy = re.findall(r"[a-z0-9]+", normalizar_copy(copy))
+    if not tokens_termo or not tokens_copy:
+        return False
+    for alvo in tokens_termo:
+        if len(alvo) < 4:
+            if alvo not in tokens_copy:
+                return False
+            continue
+        base = alvo[:max(4, len(alvo) - 2)]
+        if not any(p.startswith(base) for p in tokens_copy):
+            return False
+    return True
+
+
+def qualifica_copy(termo: str, copy: str) -> dict:
+    achados = sinais_lowticket(copy)
+    palavra = palavra_na_copy(termo, copy)
+    return {
+        "palavra_chave_encontrada": palavra,
+        "criterios_low_ticket": achados,
+        "qualifica_copy": bool(achados) and palavra,
+    }
+
+
+def dominio_da_oferta(url: str, dominio: str = "") -> str:
+    bruto = (dominio or "").strip().lower() or (urlsplit(url or "").hostname or "").lower()
+    return bruto.removeprefix("www.")
