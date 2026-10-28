@@ -295,30 +295,15 @@
 
 <main>
   <div class="filtros" id="filtros">
-    <div><label><i>▦</i>Mín. anúncios ativos</label><input type="number" id="f-ads" value="1" min="0"></div>
-    <div><label><i>◷</i>Mín. dias rodando</label><input type="number" id="f-dias" value="0" min="0"></div>
-    <div><label><i>⌕</i>Busca livre</label><input id="f-q" placeholder="texto, domínio, oferta"></div>
-    <div><label><i>#</i>Termo pesquisado</label><input id="f-termo" placeholder="ex: emagrecimento"></div>
-    <div><label><i>◎</i>País</label><select id="f-pais"><option value="">todos</option></select></div>
-    <div><label><i>⛁</i>Gateway</label><select id="f-gw"><option value="">todos</option></select></div>
-    <div><label><i>◈</i>Operação</label><select id="f-tipo">
-      <option value="">todas</option>
-      <option value="plataforma">infoproduto ou e-commerce</option>
-      <option value="infoproduto">infoproduto</option>
-      <option value="ecommerce">e-commerce</option>
-      <option value="pagamento">só meio de pagamento</option>
-    </select></div>
-    <div><label><i>R$</i>Preço</label><div class="faixa">
-      <input type="number" id="f-preco-min" min="0" step="1" placeholder="de 0">
-      <input type="number" id="f-preco-max" min="0" step="1" placeholder="até ∞"></div></div>
-    <div class="checks">
-      <label title="Preço detectado até R$ 50 (ou o valor em &quot;até&quot;), com página de checkout e site que vende. Sem preço, perfil, app e WhatsApp ficam de fora."><input type="checkbox" id="f-low"> ⚡ só low ticket</label>
-      <label><input type="checkbox" id="f-com-foto"> com foto</label>
-      <label><input type="checkbox" id="f-com-preco"> com preço</label>
-      <label><input type="checkbox" id="f-so-venda"> só quem vende</label>
+    <div style="grid-column:span 2"><label><i>#</i>Palavra-chave da oferta</label>
+      <input id="f-termo" placeholder="ex: emagrecimento, Canva, planilha"></div>
+    <div style="grid-column:span 3" class="sub">
+      A busca só mostra ofertas cuja copy contém esta palavra ou derivado e pelo
+      menos um gatilho Low Ticket, com <b>mais de 15 dias</b> e <b>5+ anúncios ou
+      criativos</b> da mesma oferta.
     </div>
     <div class="botoes">
-      <button id="btn-filtrar">↻ Filtrar</button>
+      <button id="btn-filtrar">↻ Pesquisar Low Ticket</button>
       <button id="btn-limpar-filtros" class="preset">Limpar</button>
     </div>
   </div>
@@ -392,19 +377,7 @@ const lista = () => (aba === "ofertas" ? dados : melhores);
 
 function params() {
   const p = new URLSearchParams();
-  p.set("min_anuncios", $("#f-ads").value || 0);
-  p.set("min_dias", $("#f-dias").value || 0);
-  if ($("#f-gw").value) p.set("gateway", $("#f-gw").value);
-  if ($("#f-pais").value) p.set("pais", $("#f-pais").value);
   if ($("#f-termo").value) p.set("termo", $("#f-termo").value);
-  if ($("#f-q").value) p.set("q", $("#f-q").value);
-  if ($("#f-tipo").value) p.set("tipo", $("#f-tipo").value);
-  if ($("#f-preco-min").value) p.set("preco_min", $("#f-preco-min").value);
-  if ($("#f-preco-max").value) p.set("preco_max", $("#f-preco-max").value);
-  if ($("#f-com-preco").checked) p.set("com_preco", "1");
-  if ($("#f-so-venda").checked) p.set("so_venda", "1");
-  if ($("#f-low").checked) p.set("low", "1");
-  if ($("#f-com-foto").checked) p.set("com_foto", "1");
   return p;
 }
 
@@ -465,7 +438,9 @@ function pintarCards(r) {
 }
 
 function pintarGateways() {
-  const sel = $("#f-gw"), atual = sel.value;
+  const sel = $("#f-gw");
+  if (!sel) return;
+  const atual = sel.value;
   const gws = [...new Set(dados.map(o => o.gateway).filter(Boolean))].sort();
   sel.innerHTML = '<option value="">todos</option>' +
     gws.map(g => `<option${g === atual ? " selected" : ""}>${g}</option>`).join("");
@@ -474,7 +449,9 @@ function pintarGateways() {
 // O filtro de país é aplicado no servidor, então a lista já vem reduzida:
 // o valor escolhido continua na lista para não sumir do seletor.
 function pintarPaises() {
-  const sel = $("#f-pais"), atual = sel.value;
+  const sel = $("#f-pais");
+  if (!sel) return;
+  const atual = sel.value;
   const vistos = new Set(dados.flatMap(o => o.paises || []));
   if (atual) vistos.add(atual);
   sel.innerHTML = '<option value="">todos</option>' +
@@ -616,6 +593,7 @@ function pintarCartoes(itens) {
           ${o.preco ? `<span class="preco">${esc(o.preco)}</span>` : ""}
           ${o.gateway ? `<span class="tag gw">${esc(o.gateway)}</span>` : '<span class="tag">sem gateway</span>'}
           <span class="tag" title="anúncios ativos × tempo rodando">score ${o.score}</span>
+          <span class="tag real" title="criativos/anúncios da mesma oferta">${o.criativos_oferta}+ criativos</span>
         </div>
         <div class="botoes">
           ${o.url_biblioteca ? `<a href="${o.url_biblioteca}" target="_blank" rel="noopener">Ver na Biblioteca</a>` : "<span></span>"}
@@ -624,6 +602,7 @@ function pintarCartoes(itens) {
         </div>
         ${o.checkout_url && o.destino && !o.sem_lp
           ? `<div class="linha">Checkout: <a href="${esc(o.checkout_url)}" target="_blank" rel="noopener noreferrer">${esc(o.gateway || "abrir")} ↗</a></div>` : ""}
+        ${o.criterios_low_ticket.length ? `<div class="sub">Gatilhos: ${o.criterios_low_ticket.map(esc).join(" · ")}</div>` : ""}
         ${o.copy ? `<div class="copy" title="${esc(o.copy)}">${esc(o.copy)}</div>` : ""}
       </div>
       <div class="capa">
@@ -691,7 +670,8 @@ function pintarTabela(itens) {
         ${o.checkout_url ? `<div class="sub"><a href="${esc(o.checkout_url)}" target="_blank" rel="noopener noreferrer">checkout ↗</a></div>` : ""}
       </td>
       <td>${esc(o.preco) || '<span class="sub">—</span>'}</td>
-      <td><div class="copy">${esc(o.copy)}</div></td>
+      <td><div class="copy">${esc(o.copy)}</div>
+        ${o.criterios_low_ticket.length ? `<div class="sub">${o.criterios_low_ticket.map(esc).join(" · ")}</div>` : ""}</td>
       <td><button class="excluir" data-excluir="${esc(o.page_id)}"
                   title="${aba === "ofertas" ? "Excluir dos resultados" : "Tirar de Melhores"}">✕</button></td>
     </tr>`).join("");
@@ -850,28 +830,8 @@ async function moerFila(maxRodadas = 40) {
 
 $("#btn-filtrar").onclick = carregar;
 
-// Low ticket e "com foto" ficam lembrados: o painel abre já cortando o que
-// não é oferta de entrada. "limpar filtros" desliga e mostra tudo.
-const lembrar = (id, chave, padrao) => {
-  let v = padrao;
-  try { const s = localStorage.getItem(chave); if (s !== null) v = s === "1"; } catch {}
-  $(id).checked = v;
-  $(id).addEventListener("change", () => {
-    try { localStorage.setItem(chave, $(id).checked ? "1" : "0"); } catch {}
-    carregar();
-  });
-};
-lembrar("#f-low", "mn_low", true);
-lembrar("#f-com-foto", "mn_com_foto", false);
-
 $("#btn-limpar-filtros").onclick = () => {
-  $("#f-ads").value = 1; $("#f-dias").value = 0;
-  for (const id of ["#f-preco-min", "#f-preco-max", "#f-termo", "#f-q"]) $(id).value = "";
-  $("#f-com-preco").checked = false;
-  $("#f-so-venda").checked = false;
-  $("#f-low").checked = $("#f-com-foto").checked = false;
-  try { localStorage.setItem("mn_low", "0"); localStorage.setItem("mn_com_foto", "0"); } catch {}
-  $("#f-tipo").value = ""; $("#f-gw").value = ""; $("#f-pais").value = "";
+  $("#f-termo").value = "";
   carregar();
 };
 $("#btn-reprocessar").onclick = async () => {
