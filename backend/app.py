@@ -859,7 +859,11 @@ def dados_favoritar():
     if retrato:
         ofertas = [retrato]
     else:
-        todas = {str(o["page_id"]): o for o in montar_ofertas(g.user["id"], {})}
+        # Favoritar não pode depender do filtro visual atual. Na visão
+        # "Todos os minerados" o anunciante pode não ser Low Ticket ainda,
+        # mas precisa continuar elegível para ser salvo em Melhores.
+        todas = {str(o["page_id"]): o for o in montar_ofertas(
+            g.user["id"], {"modo": "todos"})}
         ofertas = [todas[i] for i in ids if i in todas]
         if not ofertas:
             return jsonify({"erro": "anunciante nao encontrado nos resultados"}), 404
