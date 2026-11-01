@@ -505,7 +505,13 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
 
     saida = []
     for it in grupos.values():
-        total_ativos = it["total_ativos_real"] or it["ativos"] or it["anuncios_coletados"]
+        # A Biblioteca agrupa anúncios que usam o mesmo criativo/texto em um
+        # único cartão. Quando a varredura profunda ainda não forneceu a
+        # contagem real, `ativos` conta cartões agrupados (ex.: 17), enquanto
+        # `variacoes` soma os anúncios representados por esses cartões (ex.:
+        # 59). Usar a contagem de cartões subestima o anunciante.
+        total_ativos = (it["total_ativos_real"] or it["variacoes"]
+                        or it["ativos"] or it["anuncios_coletados"])
         # menor preço = oferta de entrada, que é o que interessa em low ticket
         barato = min((p for p in it["precos"] if p[0] > 0), default=None)
         o = {
