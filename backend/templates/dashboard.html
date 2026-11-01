@@ -297,7 +297,7 @@
   <div class="filtros" id="filtros">
     <div style="grid-column:span 2"><label><i>#</i>Palavra-chave da oferta</label>
       <input id="f-termo" placeholder="ex: emagrecimento, Canva, planilha"></div>
-    <div style="grid-column:span 3" class="sub">
+    <div style="grid-column:span 3" class="sub" id="descricao-filtro">
       A busca só mostra ofertas cuja copy contém esta palavra ou derivado e pelo
       menos um gatilho Low Ticket, com <b>mais de 15 dias</b> e <b>5+ anúncios ou
       criativos</b> da mesma oferta.
@@ -311,6 +311,7 @@
 
   <div class="barra-visao">
       <span class="titulo" id="titulo-lista">Ofertas low ticket</span>
+      <button id="btn-modo" class="preset" type="button">Ver todos os minerados</button>
       <select id="ordenar" title="Ordenar">
         <option value="score">Maior score</option>
         <option value="anuncios_ativos">Mais anúncios ativos</option>
@@ -368,6 +369,7 @@ let melhores = [];
 let idsFav = new Set();
 let aba = "ofertas";
 let ordem = { k: "score", asc: false };
+let modo = localStorage.getItem("mn_modo") || "low_ticket";
 // A escolha de visualização é preferência de leitura: fica no navegador.
 let visao = localStorage.getItem("mn_visao") || "cartoes";
 const selecionados = new Set();
@@ -378,7 +380,18 @@ const lista = () => (aba === "ofertas" ? dados : melhores);
 function params() {
   const p = new URLSearchParams();
   if ($("#f-termo").value) p.set("termo", $("#f-termo").value);
+  p.set("modo", modo);
   return p;
+}
+
+function pintarModo() {
+  const todos = modo === "todos";
+  $("#titulo-lista").textContent = todos ? "Todos os minerados" : "Ofertas low ticket";
+  $("#btn-modo").textContent = todos ? "Ver ofertas low ticket" : "Ver todos os minerados";
+  $("#btn-filtrar").textContent = todos ? "↻ Atualizar minerados" : "↻ Pesquisar Low Ticket";
+  $("#descricao-filtro").innerHTML = todos
+    ? "Exibindo todos os anunciantes e anúncios minerados, mesmo os que ainda não atendem aos critérios Low Ticket."
+    : "A busca só mostra ofertas cuja copy contém esta palavra ou derivado e pelo menos um gatilho Low Ticket, com <b>mais de 15 dias</b> e <b>5+ anúncios ou criativos</b> da mesma oferta.";
 }
 
 async function carregarMelhores() {
@@ -399,6 +412,13 @@ async function carregar() {
   pintar();
   if (j.resumo.destinos_pendentes > 0 || j.resumo.midias_pendentes > 0) moerFila();
 }
+
+$("#btn-modo").onclick = async () => {
+  modo = modo === "todos" ? "low_ticket" : "todos";
+  localStorage.setItem("mn_modo", modo);
+  pintarModo();
+  await carregar();
+};
 
 // Em "Melhores" os cards de cima resumem o que está salvo, não a busca inteira.
 function resumoDe(itens) {
@@ -867,6 +887,7 @@ $("#btn-tema").onclick = () => {
   pintarBotaoTema();
 };
 pintarBotaoTema();
+pintarModo();
 
 carregar();
 // Recarregar sozinho a cada 30s multiplicava o tráfego do banco por nada:
