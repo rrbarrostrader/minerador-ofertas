@@ -600,10 +600,9 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
     so_venda = filtros.get("so_venda") in ("1", "true", "on")
     com_preco = filtros.get("com_preco") in ("1", "true", "on")
     com_foto = filtros.get("com_foto") in ("1", "true", "on")
-    # Low ticket = preço detectado até R$ 50 (ou o "até" da tela), com página
-    # de checkout e destino que vende — perfil, app e WhatsApp ficam de fora.
-    # O produto agora tem um único modo: pesquisa Low Ticket qualificada.
-    low = True
+    # A visão padrão é Low Ticket qualificada. A visão "todos" existe para
+    # tornar visíveis os resultados recém-minerados antes da qualificação.
+    low = str(filtros.get("modo") or "low_ticket").lower() != "todos"
 
     def numero(chave):
         try:
@@ -617,7 +616,7 @@ def montar_ofertas(user_id: int, filtros, com_total: bool = False):
         preco_max = preco_max or LOW_TICKET_MAX
 
     def passa(i: dict) -> bool:
-        if not i["qualificado_low_ticket"]:
+        if low and not i["qualificado_low_ticket"]:
             return False
         if i["anuncios_ativos"] < min_ads or i["dias_rodando"] < min_dias:
             return False
